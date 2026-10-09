@@ -4,8 +4,6 @@
 
 Poste Windows, 3,9 Go de RAM, Docker Desktop (WSL 2) limité à 2,5 Go / 3 CPU / swap 6 Go via `.wslconfig`.
 
-Les mesures de débit (partie 5) sont donc faites sur une machine contrainte.
-
 ## Versions
 
 | Outil          | Version relevée sur mon poste                                         |
@@ -20,7 +18,7 @@ Les mesures de débit (partie 5) sont donc faites sur une machine contrainte.
 
 Non, le second conteneur ne voit pas le fichier, car chaque conteneur a sa propre couche inscriptible au-dessus de l'image en lecture seule, et celle de c1 a disparu avec lui.
 
-### Mesure 1
+### Mesure 1 - Image et couches
 
 | Grandeur                                          | Valeur relevée                                |
 | ------------------------------------------------- | --------------------------------------------- |
@@ -29,7 +27,7 @@ Non, le second conteneur ne voit pas le fichier, car chaque conteneur a sa propr
 | Nombre de couches non vides dans `docker history` | 9                                             |
 | Couche la plus volumineuse                        | Base Debian (`debian.sh ... trixie`), 87,7 MB |
 
-### Mesure 2
+### Mesure 2 - Cache de build
 
 | Scénario de rebuild                | Durée / étapes CACHED                     |
 | ---------------------------------- | ----------------------------------------- |
@@ -86,7 +84,7 @@ Justification : un intervalle de 10 secondes permet de vérifier régulièrement
 
 ### Mesure 3 — Passage à healthy
 
-À compléter avec le délai réellement observé.
+Après recréation du conteneur, le producteur a démarré à 09:11:11.314 UTC. Le premier contrôle de santé réussi s'est terminé à 09:11:18.580 UTC, soit environ 7,27 secondes après le démarrage. Les deux contrôles visibles dans l'historique ont retourné ExitCode: 0, indiquant leur réussite. Ce délai correspond à la fin du premier contrôle réussi et non à une mesure exacte de l'instant de transition vers l'état healthy.
 
 ## Partie 3
 
@@ -105,7 +103,7 @@ Justification : un intervalle de 10 secondes permet de vérifier régulièrement
 
 Temps écoulé entre `docker compose up -d kafka` et le passage à `healthy` :
 
-**À compléter avec la mesure réellement observée.**
+Après l'arrêt du conteneur, Kafka a été redémarré avec `docker compose start kafka`. Le délai total entre le début de la procédure de redémarrage et la détection de l'état `healthy` a été de **89,49 secondes**. Cette durée inclut le temps d'exécution de la commande de démarrage et la vérification périodique de l'état du conteneur. Le résultat peut varier selon la charge de la machine et l'état du broker.
 
 ### Création du topic
 
@@ -147,28 +145,37 @@ mimic-vitals:1:0
 mimic-vitals:2:0
 ```
 
-| Partition | Offset suivant |
+| Partition | Offset relevé |
 | --------: | -------------: |
-|         0 |              1 |
-|         1 |              0 |
-|         2 |              0 |
+|         0 |              19003 |
+|         1 |              12668 |
+|         2 |              6334 |
 
-Soit actuellement **1 message présent au total**.
+Ces valeurs correspondent aux offsets relevés avant la mesure de débit. Elles ne permettent pas d'identifier la partition et l'offset exacts des messages P001, P002 et P003.
 
 ### Q3.2
 
-À compléter après la lecture des cinq messages demandés dans la partie 3.4. Il faut vérifier expérimentalement si les trois messages ayant pour clé `P001` sont dans la même partition et si leurs offsets se suivent.
+La lecture des cinq premiers messages du topic mimic-vitals montre que les cinq messages se trouvent dans la partition 1, aux offsets 0 à 4. Deux messages concernent le patient P002, mais aucun ne concerne P001.
+
+Cette lecture ne permet donc pas de vérifier si les trois messages de test ayant pour clé P001 sont dans la même partition et si leurs offsets se suivent. Une lecture ciblée des messages de test est nécessaire.
 
 ## Partie 4
 
 ### Mesure 6
 
-| Forme de `depends_on`        | Le producteur affiche-t-il des erreurs de connexion au démarrage ? | Nombre de lignes d'erreur avant stabilisation |
-| ---------------------------- | ------------------------------------------------------------------ | --------------------------------------------: |
-| `depends_on: [kafka]`        | À mesurer                                                          |                                     À mesurer |
-| `condition: service_healthy` | À mesurer                                                          |                                     À mesurer |
+| Configuration                | Erreurs au démarrage ?                        |                                      Nombre de lignes d'erreur avant stabilisation |
+| ---------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------: |
+| `depends_on: [kafka]`        | Oui, `Connection refused`                     | 3 lignes d'erreur observées, dont une signale 88 occurrences identiques supprimées |
+| `condition: service_healthy` | Oui, `Coordinator load in progress: retrying` |                                                          1 ligne d'erreur observée |
 
-La forme `condition: service_healthy` sera conservée dans le rendu final.
+
+### Q4.1
+
+Avec depends_on: [kafka], Docker Compose démarre le producteur dès que le conteneur Kafka a démarré, sans attendre que le broker soit prêt. Des erreurs Connection refused ont donc été observées.
+
+Avec condition: service_healthy, le producteur attend que le healthcheck de Kafka réussisse avant de démarrer. Un message temporaire Coordinator load in progress: retrying a néanmoins été observé, car le démarrage du broker ne garantit pas que toutes ses opérations soient immédiatement disponibles.
+
+Le scénario avec condition: service_healthy limite donc les erreurs liées au démarrage prématuré du producteur.
 
 ## Partie 5
 
@@ -176,37 +183,37 @@ La forme `condition: service_healthy` sera conservée dans le rendu final.
 
 | Grandeur                                             |    Valeur |
 | ---------------------------------------------------- | --------: |
-| Somme des offsets de fin avant (t0)                  | À mesurer |
-| Somme des offsets de fin après 60 s (t1)             | À mesurer |
-| Débit calculé `(t1 - t0) / 60`                       | À mesurer |
-| Débit annoncé par le producteur à l'arrêt            | À mesurer |
-| Valeur de `INTERVAL_S` et de `NB_PATIENTS` utilisées | À mesurer |
+| Somme des offsets de fin avant (t0)                  | 60733 |
+| Somme des offsets de fin après 60 s (t1)             | 62485 |
+| Débit calculé `(t1 - t0) / 60`                       | 29,2 messages/s |
+| Débit annoncé par le producteur à l'arrêt            |  |
+| Valeur de `INTERVAL_S` et de `NB_PATIENTS` utilisées | NTERVAL_S=1.0, NB_PATIENTS=12 |
 
 ### Q5.1
 
-À compléter après les deux mesures de débit.
+Lorsque INTERVAL_S diminue de 1.0 à 0.1 seconde, le débit mesuré passe de 29,2 à 219,4 messages/s. La diminution de l'intervalle semble donc augmenter le débit de production. Toutefois, le second résultat dépasse le débit théorique de 120 messages/s attendu pour 12 patients avec un intervalle de 0,1 seconde. Cette mesure doit être vérifiée avant de conclure définitivement.
 
 ### Deuxième mesure avec `INTERVAL_S=0.1`
 
 | Grandeur                           |     Valeur |
 | ---------------------------------- | ---------: |
-| Débit mesuré avec `INTERVAL_S=0.1` |  À mesurer |
-| Écart avec la valeur théorique     | À calculer |
+| Débit mesuré avec `INTERVAL_S=0.1` |  219,4 messages/s |
+| Écart avec la valeur théorique     | 219,4 messages/s |
 
 ### Mesure 8 — Coupure du broker
 
 | Observation                                                         | Valeur relevée |
 | ------------------------------------------------------------------- | -------------- |
-| Le processus producteur s'arrête-t-il ?                             | À mesurer      |
-| Message d'erreur exact affiché (première ligne)                     | À relever      |
-| Délai entre `stop` et la première erreur                            | À mesurer      |
-| Après `start`, la production reprend-elle sans relancer le script ? | À mesurer      |
-| Des messages produits pendant la coupure ont-ils été perdus ?       | À mesurer      |
+| Le processus producteur s'arrête-t-il ?                             | Non, le conteneur reste Up et healthy. |
+| Message d'erreur exact affiché (première ligne)                     | Disconnected (after 1365316ms in state UP) |
+| Délai entre `stop` et la première erreur                            | Première erreur observée juste après l'arrêt du broker ; délai exact non mesuré séparément. |
+| Après `start`, la production reprend-elle sans relancer le script ? | Non confirmé : des erreurs Connection refused sont encore présentes dans les logs après le redémarrage. |
+| Des messages produits pendant la coupure ont-ils été perdus ?       | À vérifier en comparant les offsets et les messages livrés avant et après la coupure.  |
 
 ### Q5.2
 
-À compléter après l'expérience de coupure du broker, en s'appuyant sur les paramètres `retries`, `acks` et `enable.idempotence` de la configuration du producteur.
+Lorsque Kafka est arrêté, le producteur ne s'arrête pas immédiatement et les tentatives d'envoi rencontrent des erreurs de connexion. Le paramètre retries=5 autorise plusieurs tentatives de livraison en cas d'échec, tandis que acks=all demande une confirmation du broker avant de considérer un message comme livré. Le paramètre enable.idempotence=True limite les doublons liés aux nouvelles tentatives de livraison. Le producteur ne peut toutefois pas garantir une attente illimitée : les délais de livraison et la capacité de sa file d'attente limitent la durée pendant laquelle les messages peuvent rester en attente.
 
 ### Q6.1
 
-À compléter.
+La commande docker compose down supprime les conteneurs et le réseau du projet, mais conserve les volumes nommés, dont kafka-data. Au prochain docker compose up, Kafka réutilise donc les données persistées dans ce volume, notamment les données des topics et leurs messages. À l'inverse, docker compose down -v supprime également les volumes nommés déclarés dans le fichier Compose. Au prochain démarrage, Kafka recrée un volume vide et les anciennes données du broker ne sont plus disponibles.

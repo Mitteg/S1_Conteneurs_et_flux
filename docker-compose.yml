@@ -48,12 +48,24 @@ services:
     environment:
       KAFKA_BOOTSTRAP: kafka:9092
       VITALS_TOPIC: mimic-vitals
+      INTERVAL_S: "0.1"
+      NB_PATIENTS: "12"
 
     volumes:
       - vitals-logs:/app/logs
 
     networks:
       - vitals-net
+    
+    depends_on:
+      - kafka
+      
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   kafka-data:
