@@ -1,0 +1,9 @@
+# Environnement Python local
+.venv/
+__pycache__/
+*.pyc
+
+# Hors rendu : scripts de travail, fichiers temporaires, archive
+_outils/
+_to_delete/
+*.zip
